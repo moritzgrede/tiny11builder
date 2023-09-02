@@ -26,19 +26,14 @@ See Changelog.md for changelog history.
 #Requires -RunAsAdministrator
 
 param (
-    [CmdletBinding( DefaultParameterSetName = 'Interactive' )]
-
     # Path to ISO containing Windows 11 image
-    [Parameter( ParameterSetName = 'Interactive', Mandatory = $true )]
-    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [ValidateScript( { Test-Path -LiteralPath $_ } )]
     [String]
     $IsoPath,
 
     # Index or image name
-    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [System.Object]
-    $ImageIndex,
+    $ImageIndex = 0,
 
     # Hash value of ISO image
     [string]
@@ -244,8 +239,8 @@ try {
         "$( $Key ): $( $Indicies[$Key].Name )"
     }
     $ImageIndexState = $false
-    switch ( $PSCmdlet.ParameterSetName ) {
-        'Interactive' {
+    if ( 0 -eq $ImageIndex ) {
+        # Ask user for index
             do {
                 Write-Host ''
                 $ImageIndex = Read-Host -Prompt 'Please enter the image index'
@@ -255,9 +250,8 @@ try {
                 }
                 Write-Error "Given index $( $ImageIndex ) not found in image"
             } while ( $true )
-            break
-        }
-        'NonInteractive' {
+    } else {
+        # User has specified index in advance
             foreach ( $Index in $Indicies.GetEnumerator() ) {
                 if ( $ImageIndex -eq $Index.Name -or $ImageIndex -eq $Index.Value.Name ) {
                     $ImageIndex = $Index.Name
@@ -267,8 +261,6 @@ try {
             }
             if ( -not $ImageIndexState ) {
                 Throw "Image index $( $ImageIndex ) is invalid"
-            }
-            break
         }
     }
     Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
