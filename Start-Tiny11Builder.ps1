@@ -1,6 +1,30 @@
 <#
+.SYNOPSIS
+Script to build a trimmed-down Windows 11 image.
+
+.DESCRIPTION
+Script to build a trimmed-down Windows 11 image. See REAMDE.md for further details!
+
+.INPUTS
+None. You cannot pipe objects to Start-Tiny11Builder.ps1.
+
+.OUTPUTS
+None. Start-Tiny11Builder.ps1 does not generate any output.
+
+.EXAMPLE
+PS> .\Start-Tiny11Builder.ps1 -IsoPath '.\Win10_21H1_EnglishInternational_x64.iso'
+
+.LINK
+https://github.com/moritzgrede/tiny11builder
+
+.NOTES
+Author: Moritz Grede
+See Changelog.md for changelog history.
 #>
+
+
 param (
+    # Path to ISO containing Windows 11 image
     [Parameter( Mandatory = $true )]
     [ValidateScript( { Test-Path -LiteralPath $_ } )]
     [String]
