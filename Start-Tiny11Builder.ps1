@@ -125,8 +125,8 @@ $WorkingDirectory = @{
 # Prepare working directory
 if ( Test-Path -LiteralPath $WorkingDirectory.tiny11Path ) {
     $Choices = @(
-        New-Object -TypeName System.Management.Automation.Host.ChoiceDescription -ArgumentList '&Yes',
-        New-Object -TypeName System.Management.Automation.Host.ChoiceDescription -ArgumentList '&No'
+        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
+        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
     )
     if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
@@ -143,8 +143,8 @@ $WorkingDirectory.tiny11 = New-Item -ItemType Directory -Path $WorkingDirectory.
 # Prepare scratch directory
 if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
     $Choices = @(
-        New-Object -TypeName System.Management.Automation.Host.ChoiceDescription -ArgumentList '&Yes',
-        New-Object -TypeName System.Management.Automation.Host.ChoiceDescription -ArgumentList '&No'
+        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
+        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
     )
     if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
@@ -157,9 +157,10 @@ if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
         Throw $_
     }
 }
-$WorkingDirectory.scratch = New-Item -ItemType Directory -Path $WorkingDirectory.scratchDirectory -Force
+$WorkingDirectory.scratch = New-Item -ItemType Directory -Path $WorkingDirectory.scratchPath -Force
 
 # Welcome message
+Write-Host ''
 Write-Host 'Welcome to the'
 Write-Host '   __  _            ________          _ __    __         '
 Write-Host '  / /_(_)___  __  _<  <  / /_  __  __(_) /___/ /__  ____ '
@@ -188,8 +189,8 @@ try {
 
     # Create temporary directory and copy image
     Write-Host -NoNewline 'Copying Windows image...'
-Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J $( $Iso.DriveLetter ): `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -Wait
-if ( 0 -ne $LASTEXITCODE ) {
+    Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J `"$( $Iso.DriveLetter ):`" `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -Wait
+    if ( $LASTEXITCODE -notin ( 0, -1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
     }
@@ -221,7 +222,8 @@ if ( 0 -ne $LASTEXITCODE ) {
     do {
         Write-Host ''
         $ImageIndex = Read-Host -Prompt 'Please enter the image index'
-    if ( [int] $ImageIndex -in $Indicies.Keys ) {
+        if ( $ImageIndex -in $Indicies.Keys ) {
+            Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
             break
         }
         Write-Error "Given index $( $ImageIndex ) not found in image"
@@ -239,7 +241,7 @@ if ( 0 -ne $LASTEXITCODE ) {
 
     # Mount Windows image
     Write-Host 'Mounting Windows image. This may take a while...'
-Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' )" /index:"$( $ImageIndex )" /mountdir:"$( $WorkingDirectory.scratch.FullName )"
+    $Output = Dism.exe /mount-image /imagefile:"`"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' )`"" /index:"$( $ImageIndex )" /mountdir:"`"$( $WorkingDirectory.scratch.FullName )`""
     if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $Output )"
@@ -302,17 +304,18 @@ Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.tiny11.Fu
         }
     }
     # ToDo: Ask to remove Edge
-'Edge', 'EdgeUpdate' | ForEach-Object {
+    foreach ( $EdgePath in ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Program Files (x86)\Microsoft\Edge*' -Resolve ) ) {
         try {
-        Write-Host -NoNewline "Removing Microsoft $( $_ )..."
-        Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath "Program Files (x86)\$( $_ )" ) -Recurse -Force -ErrorAction Stop
+            $EdgePath = Get-Item -LiteralPath $EdgePath -Force
+            Write-Host -NoNewline "Removing Microsoft $( $EdgePath.BaseName )..."
+            $EdgePath | Remove-Item -Recurse -Force -ErrorAction Stop
+            Write-Host -ForegroundColor Green 'SUCCESS'
         } catch {
             Write-Host -ForegroundColor Red 'ERROR'
             Write-Error $_
             break
         }
     }
-Write-Host -ForegroundColor Green 'SUCCESS'
 
     # ToDo: Ask to remove OneDrive
     Write-Host -NoNewline 'Removing OneDrive...'
@@ -393,7 +396,7 @@ Write-Host -ForegroundColor Green 'SUCCESS'
 
     # ToDo: Ask to disable chat icon (in combination with Microsoft Teams?)
     # Disable chat icon
-Write-Host -NoNewline 'Disabling chat icon'
+    Write-Host -NoNewline 'Disabling chat icon...'
     # ToDo: Switch to PowerShell built-in methods (New-Item)
     reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' /v 'ChatIcon' /t REG_DWORD /d '3' /f | Out-Null
     reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' /v 'TaskbarMn' /t REG_DWORD /d '0' /f | Out-Null
@@ -411,7 +414,7 @@ Write-Host -NoNewline 'Disabling chat icon'
     # Cleanup
     Write-Host -NoNewline 'Cleaning up image...'
     Start-DismAction '/Cleanup-Image /StartComponentCleanup /ResetBase' -Break | Out-Null
-Write-Host 'Unmounting Windows image...'
+    Write-Host -NoNewline 'Unmounting Windows image...'
     $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
     if ( 0 -ne $ExitCode ) {
         Write-Host -ForegroundColor Red 'ERROR'
@@ -429,8 +432,8 @@ Write-Host 'Unmounting Windows image...'
 
     # Boot image modifications
     Write-Host ''
-Write-Host -NoNewline 'Mounting boot image...'
-Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.FullName -ChildPath 'sources\boot.wim' )" /index:2 /mountdir:"$( $WorkingDirectory.scratch.FullName )"
+    Write-Host -NoNewline 'Mounting boot image. This may take a while...'
+    Dism.exe /mount-image /imagefile:"`"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\boot.wim' )`"" /index:2 /mountdir:"`"$( $WorkingDirectory.scratch.FullName )`"" | Out-Null
     if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Dism.exe exited with error code $( $LASTEXITCODE )"
@@ -474,8 +477,8 @@ Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.FullName 
 
     # Finish up
     Write-Host ''
-Write-Host 'The tiny11 image is now completed. Proceeding with the making of the ISO...'
-Write-Host -NoNewline 'Copying unattended file for bypassing Microsoft account on OOBE...'
+    Write-Host 'The tiny11 image is now completed. Proceeding with the making of the ISO.'
+    Write-Host -NoNewline 'Copying unattend file for bypassing Microsoft account on OOBE...'
     try {
         Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'autounattend.xml' ) -Force -ErrorAction Stop
     } catch {
