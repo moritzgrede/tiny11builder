@@ -23,6 +23,8 @@ See Changelog.md for changelog history.
 #>
 
 
+#Requires -RunAsAdministrator
+
 param (
     # Path to ISO containing Windows 11 image
     [Parameter( Mandatory = $true )]
