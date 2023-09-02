@@ -2,7 +2,9 @@
 #>
 param (
     [Parameter( Mandatory = $true )]
-    [String] $IsoPath = ( Read-Host -Prompt 'Enter path to Windows ISO' )
+    [ValidateScript( { Test-Path -LiteralPath $_ } )]
+    [String]
+    $IsoPath
 )
 
 <#
