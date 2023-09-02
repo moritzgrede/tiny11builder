@@ -116,7 +116,7 @@ $PackagesToRemove = @(
 )
 $WorkingDirectory = @{
     'tiny11Path' = Join-Path -Path $env:TEMP -ChildPath 'tiny11'
-    'scratchPath' = Join-Path -Path $env:TEMP -ChildPath 'tiny11.scratchdir'
+    'scratchPath' = Join-Path -Path $env:TEMP -ChildPath 'tiny11.image'
 }
 
 <#
