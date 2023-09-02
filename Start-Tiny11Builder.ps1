@@ -272,6 +272,7 @@ for ( $I = 0; $I -lt $ProvisionedAppXPackagesRaw.Count; $I++) {
     }
 }
 
+# ToDo: Ask user what packages to remove
 # Remove applications
 $ProvisionedAppxPackagesToRemove | ForEach-Object {
     $Package = $_
@@ -299,6 +300,7 @@ for ( $I = 0; $I -lt $PackagesRaw.Count; $I++) {
     }
 }
 
+# ToDo: Ask user what packages to remove
 # Remove packages
 $PackagesToRemove | ForEach-Object {
     $Package = $_
@@ -319,9 +321,12 @@ $PackagesToRemove | ForEach-Object {
     }
 }
 Write-Host -ForegroundColor Green 'SUCCESS'
+
 # ToDo: Ask to remove OneDrive
 Write-Host -NoNewline 'Removing OneDrive...'
 $OneDrivePath = Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\OneDriveSetup.exe'
+# ToDo: Supress output
+# ToDo: Use PowerShell built-in methods (Set-Acl)
 takeown.exe /f $OneDrivePath | Out-Null
 icacls.exe $OneDrivePath /grant Administrators:F /T /C | Out-Null
 try {
@@ -344,8 +349,10 @@ reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullNa
 reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to remove system requirements
 # Bypass system requirements
 Write-Host -NoNewline 'Bypassing the images system requirements...'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
@@ -358,14 +365,18 @@ reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '
 reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to remove Microsoft Teams
 # Disable Microsoft Teams
 Write-Host -NoNewline 'Disabling Microsoft Teams...'
 # ToDo: Acces denied to reg path
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications' /v 'ConfigureChatAutoInstall' /t REG_DWORD /d '0' /f | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to disable sponsored apps
 # Disable sponsored apps
 Write-Host -NoNewline 'Disable sponsored apps...'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'OemPreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'PreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'SilentInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
@@ -373,19 +384,25 @@ reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' /v 'Disable
 reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' /v 'ConfigureStartPins' /t REG_SZ /d '{\"pinnedList\": [{}]}' /f | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to enable local accounts
 # Enable local accounts on OOBE
 Write-Host -NoNewline 'Enabling Local Accounts on OOBE...'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' /v 'BypassNRO' /t REG_DWORD /d '1' /f | Out-Null
 Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\Sysprep\autounattend.xml' ) -Force
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to disable reserved storage
 # Disable reserved storage
 Write-Host -NoNewline 'Disabling reserved storage...'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' /v 'ShippedWithReserves' /t REG_DWORD /d '0' /f | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
 
+# ToDo: Ask to disable chat icon (in combination with Microsoft Teams?)
 # Disable chat icon
 Write-Host -NoNewline 'Disabling chat icon'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' /v 'ChatIcon' /t REG_DWORD /d '3' /f | Out-Null
 reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' /v 'TaskbarMn' /t REG_DWORD /d '0' /f | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
@@ -438,7 +455,9 @@ reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName
 reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
 reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
 Write-Host -ForegroundColor Green 'SUCCESS'
+# ToDo: Ask to remove system requirements
 Write-Host -NoNewline 'Bypassing the images system requirements...'
+# ToDo: Switch to PowerShell built-in methods (New-Item)
 reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
 reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
