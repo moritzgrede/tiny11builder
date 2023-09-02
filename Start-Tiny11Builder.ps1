@@ -61,7 +61,6 @@ function Start-DismAction {
         if ( $Process.ExitCode -ne 0 ) {
             Write-Host -ForegroundColor Red 'ERROR'
             if ( $Break ) {
-                Start-Cleanup
                 Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
             }
             Write-Error ( Get-Content -LiteralPath $Output.FullName -Raw )
@@ -70,13 +69,6 @@ function Start-DismAction {
         }
         $Process.ExitCode
     }
-}
-
-function Start-Cleanup {
-    # Remove working directory
-    Remove-Item -LiteralPath $WorkingDirectory.tiny11Path -Recurse -Force -ErrorAction SilentlyContinue
-    # Remove scratch directory
-    Remove-Item -LiteralPath $WorkingDirectory.scratchPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 <#
@@ -176,338 +168,336 @@ Write-Host '/ /_/ / / / / /_/ / // / /_/ / /_/ / / / /_/ /  __/ /    '
 Write-Host '\__/_/_/ /_/\__, /_//_/_.___/\__,_/_/_/\__,_/\___/_/     '
 Write-Host '           /____/                                        '
 
-# Mount & check the iso
-Write-Host -NoNewline 'Mounting ISO...'
-$IsoRaw = Mount-DiskImage -ImagePath $IsoPath -StorageType ISO -Access ReadOnly -PassThru
-$Iso = Get-Volume -DiskImage $IsoRaw
-'boot.wim', 'install.wim' | ForEach-Object {
-    if ( -not ( Test-Path -LiteralPath ( Join-Path -Path $Iso.Path -ChildPath "sources\$( $_ )" ) ) ) {
+try {
+    # Mount & check the iso
+    Write-Host -NoNewline 'Mounting ISO...'
+    try {
+        $IsoRaw = Mount-DiskImage -ImagePath ( Resolve-Path -LiteralPath $IsoPath ).Path -StorageType ISO -Access ReadOnly -PassThru -ErrorAction Stop
+    } catch {
         Write-Host -ForegroundColor Red 'ERROR'
-        Throw [System.IO.FileNotFoundException]::new( "Cannot find Windows OS $( $_ ) in ISO" )
+        Throw $_
     }
-}
-Write-Host -ForegroundColor Green 'SUCCESS'
+    $Iso = Get-Volume -DiskImage $IsoRaw
+    'boot.wim', 'install.wim' | ForEach-Object {
+        if ( -not ( Test-Path -LiteralPath ( Join-Path -Path $Iso.Path -ChildPath "sources\$( $_ )" ) ) ) {
+            Write-Host -ForegroundColor Red 'ERROR'
+            Throw [System.IO.FileNotFoundException]::new( "Cannot find Windows OS $( $_ ) in ISO" )
+        }
+    }
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# Create temporary directory and copy image
-Write-Host -NoNewline 'Copying Windows image...'
+    # Create temporary directory and copy image
+    Write-Host -NoNewline 'Copying Windows image...'
 Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J $( $Iso.DriveLetter ): `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -Wait
 if ( 0 -ne $LASTEXITCODE ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
-}
-Write-Host -ForegroundColor Green 'SUCCESS'
-
-# Get image information
-Write-Host ''
-Write-Host 'Getting image index information:'
-$IndiciesRaw = Dism.exe /Get-WimInfo /wimfile:$( Join-Path -Path $Iso.Path -ChildPath 'sources\install.wim' )
-if ( 0 -ne $LASTEXITCODE ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
-}
-$Indicies = @{}
-for ( $I = 0; $I -lt $IndiciesRaw.Count; $I++ ) {
-    if ( $IndiciesRaw[$I] -like 'Index*' ) {
-        $Index = [int] ( $IndiciesRaw[$I] -split ':' )[1].Trim()
-        $Indicies[$Index] = @{
-            'Name' = ( $IndiciesRaw[$I + 1] -split ':' )[1].Trim()
-            'Description' = ( $IndiciesRaw[$I + 2] -split ':' )[1].Trim()
-            'Size' = ( $IndiciesRaw[$I + 3] -split ':' )[1].Trim()
-        }
-        $I += 3
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
     }
-}
-foreach ( $Key in $Indicies.Keys ) {
-    "$( $Key ): $( $Indicies[$Key].Name )"
-}
-do {
+    Write-Host -ForegroundColor Green 'SUCCESS'
+
+    # Get image information
     Write-Host ''
-    $ImageIndex = Read-Host -Prompt 'Please enter the image index'
-    if ( [int] $ImageIndex -in $Indicies.Keys ) {
-        break
+    Write-Host 'Getting image index information:'
+    $IndiciesRaw = Dism.exe /Get-WimInfo /wimfile:$( Join-Path -Path $Iso.Path -ChildPath 'sources\install.wim' )
+    if ( 0 -ne $LASTEXITCODE ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
     }
-    Write-Error "Given index $( $ImageIndex ) not found in image"
-} while ( $true )
-
-# Unmount iso
-Write-Host -NoNewline 'Unmounting ISO...'
-try {
-    $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction Stop
-} catch {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw $_
-}
-Write-Host -ForegroundColor Green 'SUCCESS'
-
-# Mount Windows image
-Write-Host 'Mounting Windows image. This may take a while...'
-Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' )" /index:"$( $ImageIndex )" /mountdir:"$( $WorkingDirectory.scratch.FullName )"
-if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $LASTEXITCODE ). Mounting of Windows image failed."
-}
-
-# Get provisioned applications
-Write-Host ''
-Write-Host 'Performing removal of applications...'
-$ProvisionedAppXPackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-ProvisionedAppXPackages
-if ( 0 -ne $LASTEXITCODE ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $ProvisionedAppXPackagesRaw )"
-}
-$ProvisionedAppXPackages = @()
-for ( $I = 0; $I -lt $ProvisionedAppXPackagesRaw.Count; $I++) {
-    if ( $ProvisionedAppXPackagesRaw[$I] -like 'DisplayName*' ) {
-        $ProvisionedAppXPackages += @{
-            'DisplayName' = ( $ProvisionedAppXPackagesRaw[$I] -split ':' )[1].Trim()
-            'Version' = ( $ProvisionedAppXPackagesRaw[$I + 1] -split ':' )[1].Trim()
-            'PackageName' = ( $ProvisionedAppXPackagesRaw[$I + 4] -split ':' )[1].Trim()
+    $Indicies = @{}
+    for ( $I = 0; $I -lt $IndiciesRaw.Count; $I++ ) {
+        if ( $IndiciesRaw[$I] -like 'Index*' ) {
+            $Index = [int] ( $IndiciesRaw[$I] -split ':' )[1].Trim()
+            $Indicies[$Index] = @{
+                'Name' = ( $IndiciesRaw[$I + 1] -split ':' )[1].Trim()
+                'Description' = ( $IndiciesRaw[$I + 2] -split ':' )[1].Trim()
+                'Size' = ( $IndiciesRaw[$I + 3] -split ':' )[1].Trim()
+            }
+            $I += 3
         }
-    $I += 5
     }
-}
+    foreach ( $Key in $Indicies.Keys ) {
+        "$( $Key ): $( $Indicies[$Key].Name )"
+    }
+    do {
+        Write-Host ''
+        $ImageIndex = Read-Host -Prompt 'Please enter the image index'
+    if ( [int] $ImageIndex -in $Indicies.Keys ) {
+            break
+        }
+        Write-Error "Given index $( $ImageIndex ) not found in image"
+    } while ( $true )
 
-# ToDo: Ask user what packages to remove
-# Remove applications
-$ProvisionedAppxPackagesToRemove | ForEach-Object {
-    $Package = $_
-    $ProvisionedAppXPackages | Where-Object -Property 'DisplayName' -EQ -Value $Package | ForEach-Object {
-        Write-Host -NoNewline "Removing $( $_.PackageName ) "
-        Start-DismAction "/Remove-ProvisionedAppxPackage /PackageName:$( $_.PackageName )" | Out-Null
-    }
-}
-Write-Host 'Removing of system apps complete!'
-
-# Get packages
-Write-Host ''
-Write-Host 'Performing removal of system packages...'
-$PackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-Packages
-if ( 0 -ne $LASTEXITCODE ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $PackagesRaw )"
-}
-$Packages = @()
-for ( $I = 0; $I -lt $PackagesRaw.Count; $I++) {
-    if ( $PackagesRaw[$I] -like 'Package Identity*' ) {
-        $Packages += ( $PackagesRaw[$I] -split ':' )[1].Trim()
-        $I += 3
-    }
-}
-
-# ToDo: Ask user what packages to remove
-# Remove packages
-$PackagesToRemove | ForEach-Object {
-    $Package = $_
-    $Packages | Where-Object { $_ -like "$( $Package )*" } | ForEach-Object {
-        Write-Host -NoNewline "Removing $( $_ ) "
-        Start-DismAction "/Remove-Package /PackageName:$( $_ )" | Out-Null
-    }
-}
-# ToDo: Ask to remove Edge
-'Edge', 'EdgeUpdate' | ForEach-Object {
+    # Unmount iso
+    Write-Host -NoNewline 'Unmounting ISO...'
     try {
+        $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction Stop
+    } catch {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw $_
+    }
+    Write-Host -ForegroundColor Green 'SUCCESS'
+
+    # Mount Windows image
+    Write-Host 'Mounting Windows image. This may take a while...'
+Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' )" /index:"$( $ImageIndex )" /mountdir:"$( $WorkingDirectory.scratch.FullName )"
+    if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $Output )"
+    }
+
+    # Get provisioned applications
+    Write-Host ''
+    Write-Host 'Performing removal of applications...'
+    $ProvisionedAppXPackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-ProvisionedAppXPackages
+    if ( 0 -ne $LASTEXITCODE ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $ProvisionedAppXPackagesRaw )"
+    }
+    $ProvisionedAppXPackages = @()
+    for ( $I = 0; $I -lt $ProvisionedAppXPackagesRaw.Count; $I++) {
+        if ( $ProvisionedAppXPackagesRaw[$I] -like 'DisplayName*' ) {
+            $ProvisionedAppXPackages += @{
+                'DisplayName' = ( $ProvisionedAppXPackagesRaw[$I] -split ':' )[1].Trim()
+                'Version' = ( $ProvisionedAppXPackagesRaw[$I + 1] -split ':' )[1].Trim()
+                'PackageName' = ( $ProvisionedAppXPackagesRaw[$I + 4] -split ':' )[1].Trim()
+            }
+        $I += 5
+        }
+    }
+
+    # ToDo: Ask user what packages to remove
+    # Remove applications
+    $ProvisionedAppxPackagesToRemove | ForEach-Object {
+        $Package = $_
+        $ProvisionedAppXPackages | Where-Object -Property 'DisplayName' -EQ -Value $Package | ForEach-Object {
+            Write-Host -NoNewline "Removing $( $_.PackageName ) "
+            Start-DismAction "/Remove-ProvisionedAppxPackage /PackageName:$( $_.PackageName )" | Out-Null
+        }
+    }
+    Write-Host 'Removing of system apps complete!'
+
+    # Get packages
+    Write-Host ''
+    Write-Host 'Performing removal of system packages...'
+    $PackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-Packages
+    if ( 0 -ne $LASTEXITCODE ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $PackagesRaw )"
+    }
+    $Packages = @()
+    for ( $I = 0; $I -lt $PackagesRaw.Count; $I++) {
+        if ( $PackagesRaw[$I] -like 'Package Identity*' ) {
+            $Packages += ( $PackagesRaw[$I] -split ':' )[1].Trim()
+            $I += 3
+        }
+    }
+
+    # ToDo: Ask user what packages to remove
+    # Remove packages
+    $PackagesToRemove | ForEach-Object {
+        $Package = $_
+        $Packages | Where-Object { $_ -like "$( $Package )*" } | ForEach-Object {
+            Write-Host -NoNewline "Removing $( $_ ) "
+            Start-DismAction "/Remove-Package /PackageName:$( $_ )" | Out-Null
+        }
+    }
+    # ToDo: Ask to remove Edge
+'Edge', 'EdgeUpdate' | ForEach-Object {
+        try {
         Write-Host -NoNewline "Removing Microsoft $( $_ )..."
         Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath "Program Files (x86)\$( $_ )" ) -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Host -ForegroundColor Red 'ERROR'
+            Write-Error $_
+            break
+        }
+    }
+Write-Host -ForegroundColor Green 'SUCCESS'
+
+    # ToDo: Ask to remove OneDrive
+    Write-Host -NoNewline 'Removing OneDrive...'
+    $OneDrivePath = Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\OneDriveSetup.exe'
+    # ToDo: Supress output
+    # ToDo: Use PowerShell built-in methods (Set-Acl)
+    takeown.exe /f $OneDrivePath | Out-Null
+    icacls.exe $OneDrivePath /grant Administrators:F /T /C | Out-Null
+    try {
+        Remove-Item -LiteralPath $OneDrivePath -Force -ErrorAction Stop
     } catch {
         Write-Host -ForegroundColor Red 'ERROR'
         Write-Error $_
-        break
     }
-}
-Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host 'Removing of system packages complete!'
 
-# ToDo: Ask to remove OneDrive
-Write-Host -NoNewline 'Removing OneDrive...'
-$OneDrivePath = Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\OneDriveSetup.exe'
-# ToDo: Supress output
-# ToDo: Use PowerShell built-in methods (Set-Acl)
-takeown.exe /f $OneDrivePath | Out-Null
-icacls.exe $OneDrivePath /grant Administrators:F /T /C | Out-Null
-try {
-    Remove-Item -LiteralPath $OneDrivePath -Force -ErrorAction Stop
-} catch {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Write-Error $_
-}
-Write-Host -ForegroundColor Green 'SUCCESS'
-Write-Host 'Removing of system packages complete!'
+    # Load registry
+    Write-Host ''
+    Write-Host -NoNewline 'Loading registry...'
+    # ToDo: Error handling
+    reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
+    reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
+    reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
+    reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
+    reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# Load registry
-Write-Host ''
-Write-Host -NoNewline 'Loading registry...'
-# ToDo: Error handling
-reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
-reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
-reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
-reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
-reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to remove system requirements
+    # Bypass system requirements
+    Write-Host -NoNewline 'Bypassing the images system requirements...'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassCPUCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassRAMCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassSecureBootCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# ToDo: Ask to remove system requirements
-# Bypass system requirements
-Write-Host -NoNewline 'Bypassing the images system requirements...'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassCPUCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassRAMCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassSecureBootCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to remove Microsoft Teams
+    # Disable Microsoft Teams
+    Write-Host -NoNewline 'Disabling Microsoft Teams...'
+    # ToDo: Acces denied to reg path
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications' /v 'ConfigureChatAutoInstall' /t REG_DWORD /d '0' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# ToDo: Ask to remove Microsoft Teams
-# Disable Microsoft Teams
-Write-Host -NoNewline 'Disabling Microsoft Teams...'
-# ToDo: Acces denied to reg path
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications' /v 'ConfigureChatAutoInstall' /t REG_DWORD /d '0' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to disable sponsored apps
+    # Disable sponsored apps
+    Write-Host -NoNewline 'Disable sponsored apps...'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'OemPreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'PreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'SilentInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' /v 'DisableWindowsConsumerFeatures' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' /v 'ConfigureStartPins' /t REG_SZ /d '{\"pinnedList\": [{}]}' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# ToDo: Ask to disable sponsored apps
-# Disable sponsored apps
-Write-Host -NoNewline 'Disable sponsored apps...'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'OemPreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'PreInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'SilentInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' /v 'DisableWindowsConsumerFeatures' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' /v 'ConfigureStartPins' /t REG_SZ /d '{\"pinnedList\": [{}]}' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to enable local accounts
+    # Enable local accounts on OOBE
+    Write-Host -NoNewline 'Enabling Local Accounts on OOBE...'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' /v 'BypassNRO' /t REG_DWORD /d '1' /f | Out-Null
+    Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\Sysprep\autounattend.xml' ) -Force
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# ToDo: Ask to enable local accounts
-# Enable local accounts on OOBE
-Write-Host -NoNewline 'Enabling Local Accounts on OOBE...'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' /v 'BypassNRO' /t REG_DWORD /d '1' /f | Out-Null
-Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\Sysprep\autounattend.xml' ) -Force
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to disable reserved storage
+    # Disable reserved storage
+    Write-Host -NoNewline 'Disabling reserved storage...'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' /v 'ShippedWithReserves' /t REG_DWORD /d '0' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# ToDo: Ask to disable reserved storage
-# Disable reserved storage
-Write-Host -NoNewline 'Disabling reserved storage...'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' /v 'ShippedWithReserves' /t REG_DWORD /d '0' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
-
-# ToDo: Ask to disable chat icon (in combination with Microsoft Teams?)
-# Disable chat icon
+    # ToDo: Ask to disable chat icon (in combination with Microsoft Teams?)
+    # Disable chat icon
 Write-Host -NoNewline 'Disabling chat icon'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' /v 'ChatIcon' /t REG_DWORD /d '3' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' /v 'TaskbarMn' /t REG_DWORD /d '0' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' /v 'ChatIcon' /t REG_DWORD /d '3' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' /v 'TaskbarMn' /t REG_DWORD /d '0' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# Unload registry
-Write-Host -NoNewline 'Completed changes in registry. Unmounting registry...'
-reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
-reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
-reg.exe UNLOAD HKLM\zNTUSER | Out-Null
-reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
-reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
+    # Unload registry
+    Write-Host -NoNewline 'Completed changes in registry. Unmounting registry...'
+    reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
+    reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
+    reg.exe UNLOAD HKLM\zNTUSER | Out-Null
+    reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
+    reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
-# Cleanup
-Write-Host -NoNewline 'Cleaning up image...'
-Start-DismAction '/Cleanup-Image /StartComponentCleanup /ResetBase' -Break | Out-Null
+    # Cleanup
+    Write-Host -NoNewline 'Cleaning up image...'
+    Start-DismAction '/Cleanup-Image /StartComponentCleanup /ResetBase' -Break | Out-Null
 Write-Host 'Unmounting Windows image...'
-$ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
-if ( 0 -ne $ExitCode ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
-}
-Write-Host -NoNewline 'Exporting Windows image...'
-$ExitCode = Start-DismAction -NoImage "/Export-Image /SourceImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) /SourceIndex:$ImageIndex /DestinationImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) /compress:max"
-if ( 0 -ne $ExitCode ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $ExitCode )"
-}
-Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -Force
-Rename-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) -NewName 'install.wim' -Force
-Write-Host 'Windows image completed. Continuing with boot.wim.'
+    $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
+    if ( 0 -ne $ExitCode ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
+    }
+    Write-Host -NoNewline 'Exporting Windows image...'
+    $ExitCode = Start-DismAction -NoImage "/Export-Image /SourceImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) /SourceIndex:$ImageIndex /DestinationImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) /compress:max"
+    if ( 0 -ne $ExitCode ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $ExitCode )"
+    }
+    Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -Force
+    Rename-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) -NewName 'install.wim' -Force
+    Write-Host 'Windows image completed. Continuing with boot.wim.'
 
-# Boot image modifications
-Write-Host ''
+    # Boot image modifications
+    Write-Host ''
 Write-Host -NoNewline 'Mounting boot image...'
 Dism.exe /mount-image /imagefile:"$( Join-Path -Path $WorkingDirectory.FullName -ChildPath 'sources\boot.wim' )" /index:2 /mountdir:"$( $WorkingDirectory.scratch.FullName )"
-if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $LASTEXITCODE )"
-}
-Write-Host -NoNewline 'Loading registry...'
-# ToDo: Error handling
-reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
-reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
-reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
-reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
-reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
-# ToDo: Ask to remove system requirements
-Write-Host -NoNewline 'Bypassing the images system requirements...'
-# ToDo: Switch to PowerShell built-in methods (New-Item)
-reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassCPUCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassRAMCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassSecureBootCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
-reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
-Write-Host -NoNewline 'Completed changes in registry. Unmounting registry...'
-reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
-reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
-reg.exe UNLOAD HKLM\zNTUSER | Out-Null
-reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
-reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
-Write-Host -ForegroundColor Green 'SUCCESS'
-Write-Host -NoNewline 'Unmounting boot image...'
-$ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
-if ( 0 -ne $ExitCode ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
-    Start-Cleanup
-    Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
-}
-Write-Host 'Boot image completed.'
+    if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $LASTEXITCODE )"
+    }
+    Write-Host -NoNewline 'Loading registry...'
+    # ToDo: Error handling
+    reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
+    reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
+    reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
+    reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
+    reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    # ToDo: Ask to remove system requirements
+    Write-Host -NoNewline 'Bypassing the images system requirements...'
+    # ToDo: Switch to PowerShell built-in methods (New-Item)
+    reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV2' /t REG_DWORD /d '0' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassCPUCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassRAMCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassSecureBootCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
+    reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host -NoNewline 'Completed changes in registry. Unmounting registry...'
+    reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
+    reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
+    reg.exe UNLOAD HKLM\zNTUSER | Out-Null
+    reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
+    reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host -NoNewline 'Unmounting boot image...'
+    $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
+    if ( 0 -ne $ExitCode ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
+    }
+    Write-Host 'Boot image completed.'
 
-# Finish up
-Write-Host ''
+    # Finish up
+    Write-Host ''
 Write-Host 'The tiny11 image is now completed. Proceeding with the making of the ISO...'
 Write-Host -NoNewline 'Copying unattended file for bypassing Microsoft account on OOBE...'
-try {
-    Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'autounattend.xml' ) -Force -ErrorAction Stop
+    try {
+        Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'autounattend.xml' ) -Force -ErrorAction Stop
+    } catch {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw $_
+    }
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host 'Creating ISO image...'
+    Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( Join-Path -Path $PSScriptRoot -ChildPath 'tiny11.iso' )" -NoNewWindow -Wait
+    if ( 0 -ne $LASTEXITCODE ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw "oscdimg.exe exited with error code $( $LASTEXITCODE )"
+    }
 } catch {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
     Throw $_
+} finally {
+    Write-Host -NoNewline 'Performing cleanup...'
+    # Unmount image
+    Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
+    # Remove working directory
+    Remove-Item -LiteralPath $WorkingDirectory.tiny11Path -Recurse -Force -ErrorAction SilentlyContinue
+    # Remove scratch directory
+    Remove-Item -LiteralPath $WorkingDirectory.scratchPath -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host -ForegroundColor Green 'SUCCESS'
 }
-Write-Host -ForegroundColor Green 'SUCCESS'
-Write-Host 'Creating ISO image...'
-Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( Join-Path -Path $PSScriptRoot -ChildPath 'tiny11.iso' )" -NoNewWindow -Wait
-if ( 0 -ne $LASTEXITCODE ) {
-    Write-Host -ForegroundColor Red 'ERROR'
-    Start-Cleanup
-    Throw "oscdimg.exe exited with error code $( $LASTEXITCODE )"
-}
-Write-Host -NoNewline 'Performing cleanup...'
-Start-Cleanup
-Write-Host -ForegroundColor Green 'SUCCESS'
-
-Write-Host ''
-Write-Host 'Creation completed! Check above messages and then press any key to exit the script...'
