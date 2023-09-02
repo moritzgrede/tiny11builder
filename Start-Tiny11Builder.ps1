@@ -26,11 +26,19 @@ See Changelog.md for changelog history.
 #Requires -RunAsAdministrator
 
 param (
+    [CmdletBinding( DefaultParameterSetName = 'Interactive' )]
+
     # Path to ISO containing Windows 11 image
-    [Parameter( Mandatory = $true )]
+    [Parameter( ParameterSetName = 'Interactive', Mandatory = $true )]
+    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [ValidateScript( { Test-Path -LiteralPath $_ } )]
     [String]
-    $IsoPath
+    $IsoPath,
+
+    # Index or image name
+    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
+    [System.Object]
+    $ImageIndex
 )
 
 <#
@@ -195,15 +203,17 @@ try {
         Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
     }
     Write-Host -ForegroundColor Green 'SUCCESS'
-
+    
     # Get image information
     Write-Host ''
-    Write-Host 'Getting image index information:'
+    Write-Host 'Getting image index information...'
     $IndiciesRaw = Dism.exe /Get-WimInfo /wimfile:$( Join-Path -Path $Iso.Path -ChildPath 'sources\install.wim' )
     if ( 0 -ne $LASTEXITCODE ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
     }
+    Write-Host -ForegroundColor Green 'SUCCESS'
+    Write-Host ''
     $Indicies = @{}
     for ( $I = 0; $I -lt $IndiciesRaw.Count; $I++ ) {
         if ( $IndiciesRaw[$I] -like 'Index*' ) {
@@ -219,15 +229,35 @@ try {
     foreach ( $Key in $Indicies.Keys ) {
         "$( $Key ): $( $Indicies[$Key].Name )"
     }
-    do {
-        Write-Host ''
-        $ImageIndex = Read-Host -Prompt 'Please enter the image index'
-        if ( $ImageIndex -in $Indicies.Keys ) {
-            Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
+    $ImageIndexState = $false
+    switch ( $PSCmdlet.ParameterSetName ) {
+        'Interactive' {
+            do {
+                Write-Host ''
+                $ImageIndex = Read-Host -Prompt 'Please enter the image index'
+                if ( $ImageIndex -in $Indicies.Keys ) {
+                    $ImageIndexState = $true
+                    break
+                }
+                Write-Error "Given index $( $ImageIndex ) not found in image"
+            } while ( $true )
             break
         }
-        Write-Error "Given index $( $ImageIndex ) not found in image"
-    } while ( $true )
+        'NonInteractive' {
+            foreach ( $Index in $Indicies.GetEnumerator() ) {
+                if ( $ImageIndex -eq $Index.Name -or $ImageIndex -eq $Index.Value.Name ) {
+                    $ImageIndex = $Index.Name
+                    $ImageIndexState = $true
+                    break
+                }
+            }
+            if ( -not $ImageIndexState ) {
+                Throw "Image index $( $ImageIndex ) is invalid"
+            }
+            break
+        }
+    }
+    Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
 
     # Unmount iso
     Write-Host -NoNewline 'Unmounting ISO...'
