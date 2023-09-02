@@ -38,7 +38,11 @@ param (
     # Index or image name
     [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [System.Object]
-    $ImageIndex
+    $ImageIndex,
+
+    # Hash value of ISO image
+    [string]
+    $CheckIsoHash = ''
 )
 
 <#
@@ -130,6 +134,16 @@ $WorkingDirectory = @{
 <#
     SCRIPT
 #>
+# If set, check file hash of ISO
+if ( -not [string]::IsNullOrEmpty( $CheckIsoHash ) ) {
+    Write-Host -NoNewline 'Checking file hash...'
+    if ( ( Get-FileHash -LiteralPath $IsoPath ).Hash -ne $CheckIsoHash ) {
+        Write-Host -ForegroundColor Red 'ERROR'
+        Throw 'File hash does not match!'
+    }
+    Write-Host -ForegroundColor Green 'SUCCESS'
+}
+
 # Prepare working directory
 if ( Test-Path -LiteralPath $WorkingDirectory.tiny11Path ) {
     $Choices = @(
