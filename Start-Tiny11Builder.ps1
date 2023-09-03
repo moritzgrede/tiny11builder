@@ -248,10 +248,12 @@ try {
 
     # Create temporary directory and copy image
     Write-Host -NoNewline 'Copying Windows image...'
-    Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J `"$( $Iso.DriveLetter ):`" `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -Wait
-    if ( $LASTEXITCODE -notin ( 0, -1 ) ) {
+    $Output = New-TemporaryFile
+    $Xcopy = Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J `"$( $Iso.DriveLetter ):`" `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -RedirectStandardOutput $Output.FullName -Wait -PassThru
+    if ( 0 -ne $Xcopy.ExitCode ) {
         Write-Host -ForegroundColor Red 'ERROR'
-        Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
+        $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction SilentlyContinue
+        Throw "xcopy.exe exited with error code $( $LASTEXITCODE )`r`n$( Get-Content -LiteralPath $Output.FullName -Raw )"
     }
     $ScriptProgress.IsoCopy = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
