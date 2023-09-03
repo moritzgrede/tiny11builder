@@ -135,6 +135,34 @@ $WorkingDirectory = @{
     'tiny11Path' = Join-Path -Path $env:TEMP -ChildPath 'tiny11'
     'scratchPath' = Join-Path -Path $env:TEMP -ChildPath 'tiny11.image'
 }
+$ScriptProgress = @{
+    'WorkingDirectory'          = $false
+    'ScratchDirectory'          = $false
+    'IsoMount'                  = $false
+    'IsoCopy'                   = $false
+    'IsoIndex'                  = $false
+    'IsoDismount'               = $false
+    'DismInstallMount'          = $false
+    'AppxPackageRemoval'        = $false
+    'PackageRemoval'            = $false
+    'EdgeRemoval'               = $false
+    'OneDriveRemoval'           = $false
+    'InstallRegistryMount'      = $false
+    'SystemRequirementsInstall' = $false
+    'Teams'                     = $false
+    'SponsoredApps'             = $false
+    'LocalAccounts'             = $false
+    'ReservedStorage'           = $false
+    'Chat'                      = $false
+    'InstallRegistryDismount'   = $false
+    'DismInstallDismount'       = $false
+    'DismBootMount'             = $false
+    'BootRegistryMount'         = $false
+    'SystemRequirementsBoot'    = $false
+    'BootRegistryDismount'      = $false
+    'DismBootDismount'          = $false
+    'IsoCreation'               = $false
+}
 
 <#
     SCRIPT
@@ -167,6 +195,7 @@ if ( Test-Path -LiteralPath $WorkingDirectory.tiny11Path ) {
     }
 }
 $WorkingDirectory.tiny11 = New-Item -ItemType Directory -Path $WorkingDirectory.tiny11Path -Force
+$ScriptProgress.WorkingDirectory = $true
 # Prepare scratch directory
 if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
     $Choices = @(
@@ -185,6 +214,7 @@ if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
     }
 }
 $WorkingDirectory.scratch = New-Item -ItemType Directory -Path $WorkingDirectory.scratchPath -Force
+$ScriptProgress.ScratchDirectory = $true
 
 # Welcome message
 Write-Host ''
@@ -209,9 +239,11 @@ try {
     'boot.wim', 'install.wim' | ForEach-Object {
         if ( -not ( Test-Path -LiteralPath ( Join-Path -Path $Iso.Path -ChildPath "sources\$( $_ )" ) ) ) {
             Write-Host -ForegroundColor Red 'ERROR'
+            $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction SilentlyContinue
             Throw [System.IO.FileNotFoundException]::new( "Cannot find Windows OS $( $_ ) in ISO" )
         }
     }
+    $ScriptProgress.IsoMount = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
 
     # Create temporary directory and copy image
@@ -221,6 +253,7 @@ try {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "xcopy.exe exited with error code $( $LASTEXITCODE )"
     }
+    $ScriptProgress.IsoCopy = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
     
     # Get image information
@@ -273,16 +306,18 @@ try {
             Throw "Image index $( $ImageIndex ) is invalid"
         }
     }
+    $ScriptProgress.IsoIndex = $true
     Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
 
     # Unmount iso
-    Write-Host -NoNewline 'Unmounting ISO...'
+    Write-Host -NoNewline 'Dismounting ISO...'
     try {
         $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction Stop
     } catch {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw $_
     }
+    $ScriptProgress.IsoDismount = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
 
     # Mount Windows image
@@ -292,6 +327,7 @@ try {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $Output )"
     }
+    $ScriptProgress.DismInstallMount = $true
 
     # Get provisioned applications
     Write-Host ''
@@ -335,6 +371,7 @@ try {
             }
         }
     }
+    $ScriptProgress.AppxPackageRemoval = $true
     Write-Host 'Removing of system apps complete!'
 
     # Get packages
@@ -375,6 +412,7 @@ try {
             }
         }
     }
+    $ScriptProgress.PackageRemoval = $true
 
     if ( $RemoveEdge ) {
         foreach ( $EdgePath in ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Program Files (x86)\Microsoft\Edge*' -Resolve ) ) {
@@ -382,8 +420,10 @@ try {
                 $EdgePath = Get-Item -LiteralPath $EdgePath -Force
                 Write-Host -NoNewline "Removing Microsoft $( $EdgePath.BaseName )..."
                 $EdgePath | Remove-Item -Recurse -Force -ErrorAction Stop
+                $ScriptProgress.EdgeRemoval = $true
                 Write-Host -ForegroundColor Green 'SUCCESS'
             } catch {
+                $ScriptProgress.EdgeRemoval = $false
                 Write-Host -ForegroundColor Red 'ERROR'
                 Write-Error $_
                 break
@@ -403,6 +443,7 @@ try {
             Write-Host -ForegroundColor Red 'ERROR'
             Write-Error $_
         }
+        $ScriptProgress.OneDriveRemoval = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
     }
 
@@ -417,6 +458,7 @@ try {
         reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
         reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
         reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
+        $ScriptProgress.InstallRegistryMount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
 
         if ( $RemoveSystemRequirements ) {
@@ -433,6 +475,7 @@ try {
             reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
             reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
             reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
+            $ScriptProgress.SystemRequirementsInstall = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
@@ -462,6 +505,7 @@ try {
             reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' /v 'SilentInstalledAppsEnabled' /t REG_DWORD /d '0' /f | Out-Null
             reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' /v 'DisableWindowsConsumerFeatures' /t REG_DWORD /d '1' /f | Out-Null
             reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\PolicyManager\current\device\Start' /v 'ConfigureStartPins' /t REG_SZ /d '{\"pinnedList\": [{}]}' /f | Out-Null
+            $ScriptProgress.SponsoredApps = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
@@ -471,6 +515,7 @@ try {
             # ToDo: Switch to PowerShell built-in methods (New-Item)
             reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' /v 'BypassNRO' /t REG_DWORD /d '1' /f | Out-Null
             Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\Sysprep\autounattend.xml' ) -Force
+            $ScriptProgress.LocalAccounts = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
@@ -479,6 +524,7 @@ try {
             Write-Host -NoNewline 'Disabling reserved storage...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
             reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' /v 'ShippedWithReserves' /t REG_DWORD /d '0' /f | Out-Null
+            $ScriptProgress.ReservedStorage = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
@@ -488,6 +534,7 @@ try {
             # ToDo: Switch to PowerShell built-in methods (New-Item)
             reg.exe ADD 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' /v 'ChatIcon' /t REG_DWORD /d '3' /f | Out-Null
             reg.exe ADD 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' /v 'TaskbarMn' /t REG_DWORD /d '0' /f | Out-Null
+            $ScriptProgress.Chat = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
@@ -498,6 +545,7 @@ try {
         reg.exe UNLOAD HKLM\zNTUSER | Out-Null
         reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
         reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+        $ScriptProgress.InstallRegistryDismount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
     }
 
@@ -518,6 +566,7 @@ try {
     }
     Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -Force
     Rename-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) -NewName 'install.wim' -Force
+    $ScriptProgress.DismInstallDismount = $true
     Write-Host 'Windows image completed. Continuing with boot.wim.'
 
     # Boot image modifications
@@ -529,12 +578,14 @@ try {
             Write-Host -ForegroundColor Red 'ERROR'
             Throw "Dism.exe exited with error code $( $LASTEXITCODE )"
         }
+        $ScriptProgress.DismBootMount = $true
         Write-Host -NoNewline 'Loading registry...'
         reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
         reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
         reg.exe LOAD HKLM\zNTUSER "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Users\Default\ntuser.dat' )" | Out-Null
         reg.exe LOAD HKLM\zSOFTWARE "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SOFTWARE' )" | Out-Null
         reg.exe LOAD HKLM\zSYSTEM "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\SYSTEM' )" | Out-Null
+        $ScriptProgress.BootRegistryMount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
 
         Write-Host -NoNewline 'Bypassing the images system requirements...'
@@ -549,6 +600,7 @@ try {
         reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassStorageCheck' /t REG_DWORD /d '1' /f | Out-Null
         reg.exe ADD 'HKLM\zSYSTEM\Setup\LabConfig' /v 'BypassTPMCheck' /t REG_DWORD /d '1' /f | Out-Null
         reg.exe ADD 'HKLM\zSYSTEM\Setup\MoSetup' /v 'AllowUpgradesWithUnsupportedTPMOrCPU' /t REG_DWORD /d '1' /f | Out-Null
+        $ScriptProgress.SystemRequirementsBoot = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
         Write-Host -NoNewline 'Completed changes in registry. Unmounting registry...'
         reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
@@ -556,6 +608,7 @@ try {
         reg.exe UNLOAD HKLM\zNTUSER | Out-Null
         reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
         reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+        $ScriptProgress.BootRegistryDismount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
         Write-Host -NoNewline 'Unmounting boot image...'
         $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
@@ -563,6 +616,7 @@ try {
             Write-Host -ForegroundColor Red 'ERROR'
             Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
         }
+        $ScriptProgress.DismBootDismount = $true
         Write-Host 'Boot image completed.'
     }
 
@@ -593,15 +647,47 @@ try {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "oscdimg.exe exited with error code $( $LASTEXITCODE )"
     }
+    $ScriptProgress.IsoCreation = $true
 } catch {
     Throw $_
 } finally {
-    Write-Host -NoNewline 'Performing cleanup...'
-    # Unmount image
-    Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
-    # Remove working directory
-    Remove-Item -LiteralPath $WorkingDirectory.tiny11Path -Recurse -Force -ErrorAction SilentlyContinue
-    # Remove scratch directory
-    Remove-Item -LiteralPath $WorkingDirectory.scratchPath -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host -ForegroundColor Green 'SUCCESS'
+    if ( $ScriptProgress.IsoCreation ) {
+        Write-Host -NoNewline 'Performing cleanup...'
+    }
+    if ( $ScriptProgress.DismBootMount -and -not $ScriptProgress.DismBootDismount ) {
+        if ( $ScriptProgress.BootRegistryMount -and -not $ScriptProgress.BootRegistryDismount ) {
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+            reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
+            reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
+            reg.exe UNLOAD HKLM\zNTUSER | Out-Null
+            reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
+            reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+        }
+        Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
+    }
+    if ( $ScriptProgress.DismInstallMount -and -not $ScriptProgress.DismInstallDismount ) {
+        if ( $ScriptProgress.InstallRegistryMount -and -not $ScriptProgress.InstallRegistryDismount ) {
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+            reg.exe UNLOAD HKLM\zCOMPONENTS | Out-Null
+            reg.exe UNLOAD HKLM\zDEFAULT | Out-Null
+            reg.exe UNLOAD HKLM\zNTUSER | Out-Null
+            reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
+            reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
+        }
+        Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
+    }
+    if ( $ScriptProgress.IsoMount -and -not $ScriptProgress.IsoDismount ) {
+        $IsoRaw = $IsoRaw | Dismount-DiskImage
+    }
+    if ( $ScriptProgress.ScratchDirectory ) {
+        Remove-Item -LiteralPath $WorkingDirectory.scratchPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ( $ScriptProgress.WorkingDirectory ) {
+        Remove-Item -LiteralPath $WorkingDirectory.tiny11Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ( $ScriptProgress.IsoCreation ) {
+        Write-Host -ForegroundColor Green 'SUCCESS'
+    }
 }
