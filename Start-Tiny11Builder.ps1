@@ -36,6 +36,11 @@ param (
     [System.Object]
     $ImageIndex = 0,
 
+    # Name of create image file
+    [ValidateScript( { Test-Path -IsValid -LiteralPath $_ } )]
+    [string]
+    $ImagePath = '.\tiny11.iso',
+
     # Provisioned AppxPackages to remove
     [string[]]
     $ProvisionedAppxPackagesToRemove = @(),
@@ -561,7 +566,7 @@ try {
     }
     Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host 'Creating ISO image...'
-    Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( Join-Path -Path $PSScriptRoot -ChildPath 'tiny11.iso' )" -NoNewWindow -Wait
+    Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( $ImagePath )" -NoNewWindow -Wait
     if ( 0 -ne $LASTEXITCODE ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "oscdimg.exe exited with error code $( $LASTEXITCODE )"
