@@ -43,11 +43,11 @@ param (
 
     # Provisioned AppxPackages to remove
     [string[]]
-    $ProvisionedAppxPackagesToRemove = @(),
+    $ProvisionedAppxPackagesToRemove = $null,
 
     # Packages to remove
     [string[]]
-    $PackagesToRemove = @(),
+    $PackagesToRemove = $null,
 
     # Wether to remove system requirements
     [switch]
@@ -310,7 +310,7 @@ try {
     }
 
     # Remove applications
-    if ( 0 -eq $ProvisionedAppxPackagesToRemove.Count ) {
+    if ( $null -eq $ProvisionedAppxPackagesToRemove ) {
         # Ask user to specify applications
         $Choices = @(
             New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
@@ -322,7 +322,7 @@ try {
                 Start-DismAction "/Remove-ProvisionedAppxPackage /PackageName:$( $Package.PackageName )" | Out-Null
             }
         }
-    } else {
+    } elseif ( 0 -ne $ProvisionedAppxPackagesToRemove.Count ) {
         # Remove specified applications
         foreach ( $Package in $ProvisionedAppxPackagesToRemove ) {
             $ProvisionedAppXPackages | Where-Object -Property 'DisplayName' -EQ -Value $Package.DisplayName | ForEach-Object {
@@ -350,7 +350,7 @@ try {
     }
 
     # Remove packages
-    if ( 0 -eq $PackagesToRemove.Count ) {
+    if ( $null -eq $PackagesToRemove ) {
         # Ask user to specify applications
         $Choices = @(
             New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
@@ -363,7 +363,7 @@ try {
                 Start-DismAction "/Remove-Package /PackageName:$( $Package )" | Out-Null
             }
         }
-    } else {
+    } elseif ( 0 -ne $PackagesToRemove.Count ) {
         foreach ( $Package in $PackagesToRemove ) {
             $Packages | Where-Object { $_ -like "$( $Package )*" } | ForEach-Object {
                 Write-Host -NoNewline "Removing $( $_ ) "
