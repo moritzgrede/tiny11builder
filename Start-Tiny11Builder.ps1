@@ -436,9 +436,12 @@ try {
     if ( $RemoveOneDrive ) {
         Write-Host -NoNewline 'Removing OneDrive...'
         $OneDrivePath = Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\OneDriveSetup.exe'
-        # ToDo: Supress output / Use PowerShell built-in methods (Set-Acl)
-        takeown.exe /f $OneDrivePath | Out-Null
-        icacls.exe $OneDrivePath /grant Administrators:F /T /C | Out-Null
+        $Owner = New-Object -TypeName System.Security.Principal.SecurityIdentifier -ArgumentList 'S-1-5-32-544'
+        $Acl = Get-Acl -LiteralPath $OneDrivePath
+        $Acl.SetOwner( $Owner )
+        $Acl = $Acl | Set-Acl -LiteralPath $OneDrivePath -Passthru
+        $Acl.AddAccessRule( ( New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList $Owner, 'FullControl', 'None', 'InheritOnly', 'Allow' ) )
+        $Acl | Set-Acl -LiteralPath $OneDrivePath
         try {
             Remove-Item -LiteralPath $OneDrivePath -Force -ErrorAction Stop
         } catch {
