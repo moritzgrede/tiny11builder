@@ -66,8 +66,8 @@ param (
     $RemoveOneDrive,
 
     # Wether to remove Microsoft Teams
-    [switch]
-    $RemoveTeams,
+    # [switch]
+    # $RemoveTeams,
 
     # Wether to remove chat icon in taskbar
     [switch]
@@ -432,14 +432,22 @@ try {
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
+        <#
         if ( $RemoveTeams ) {
             # Disable Microsoft Teams
             Write-Host -NoNewline 'Disabling Microsoft Teams...'
-            # ToDo: Acces denied to reg path
             # ToDo: Switch to PowerShell built-in methods (New-Item)
+            $Owner = New-Object -TypeName System.Security.Principal.SecurityIdentifier -ArgumentList 'S-1-5-32-544'
+            $Acl = Get-Acl -Path 'HKLM:\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications'
+            $Acl.SetOwner( $Owner )
+            $Acl = $Acl | Set-Acl -LiteralPath 'HKLM:\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications' -Passthru
+            $Acl.AddAccessRule( ( New-Object -TypeName System.Security.AccessControl.RegistryAccessRule -ArgumentList $Owner, 'FullControl', 'ContainerInherit,ObjectInherit', 'InheritOnly', 'Allow' ) )
+            $Acl | Set-Acl -Path 'HKLM:\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications'
             reg.exe ADD 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Communications' /v 'ConfigureChatAutoInstall' /t REG_DWORD /d '0' /f | Out-Null
+            $ScriptProgress.Teams = $true
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
+        #>
 
         if ( $RemoveSponsoredApps ) {
             # Disable sponsored apps
