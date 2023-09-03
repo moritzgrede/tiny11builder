@@ -27,8 +27,9 @@ See Changelog.md for changelog history.
 
 param (
     # Path to ISO containing Windows 11 image
-    [ValidateScript( { Test-Path -LiteralPath $_ } )]
-    [String]
+    [Parameter( Mandatory = $true )]
+    [ValidateScript( { -not [string]::IsNullOrEmpty( $_ ) -and ( Test-Path -LiteralPath $_ ) } )]
+    [string]
     $IsoPath,
 
     # Index or image name
