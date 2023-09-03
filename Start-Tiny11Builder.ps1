@@ -83,7 +83,11 @@ param (
 
     # Hash value of ISO image
     [string]
-    $CheckIsoHash = ''
+    $CheckIsoHash = '',
+
+    # Does not confirm file overrides with user
+    [switch]
+    $Force
 )
 
 <#
@@ -151,7 +155,7 @@ if ( Test-Path -LiteralPath $WorkingDirectory.tiny11Path ) {
         New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
         New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
     )
-    if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
+    if ( -not $Force -and 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists"
     }
@@ -169,7 +173,7 @@ if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
         New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
         New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
     )
-    if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
+    if ( -not $Force -and 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists"
     }
@@ -574,6 +578,16 @@ try {
     }
     Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host 'Creating ISO image...'
+    if ( -not $Force -and ( Test-Path -LiteralPath $ImagePath ) ) {
+        $Choices = @(
+            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
+            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
+        )
+        if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite image?', "ISO `"$( $ImagePath )`" already exists, override?`r`nData may be lost!", $Choices, 0 ) ) {
+            Write-Host -ForegroundColor Red 'ERROR'
+            Throw "ISO `"$( $ImagePath )`" already exists"
+        }
+    }
     Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( $ImagePath )" -NoNewWindow -Wait
     if ( 0 -ne $LASTEXITCODE ) {
         Write-Host -ForegroundColor Red 'ERROR'
