@@ -10,11 +10,12 @@ In theory all Windows 11 ISOs are supported.
 
 Instructions:
 
-1. Download Windows 11 from the Microsoft website (<https://www.microsoft.com/software-download/windows11>)
-2. Run `Start-Tiny11Builder.ps1` as an Administrator
-3. Select the SKU that you want the image to be based on.
-4. Sit back and relax :)
-5. When the image is completed, you will see it in the folder where the script was executed, with the name `tiny11.iso`
+1. Download Windows 11 from the [Microsoft website](https://www.microsoft.com/software-download/windows11)
+1. Run `Start-Tiny11Builder.ps1` as an Administrator
+    * Optionally define command line switches to specify what to remove
+1. Select the SKU that you want the image to be based on.
+1. The image will ask you what packages to remove
+1. When the image is completed, you will see it in the folder where the script was executed, with the name `tiny11.iso`
 
 What is removed:
 Clipchamp,
