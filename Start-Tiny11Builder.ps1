@@ -1,3 +1,4 @@
+#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
 Script to build a trimmed-down Windows 11 image.
@@ -23,110 +24,91 @@ See Changelog.md for changelog history.
 #>
 
 
-#Requires -RunAsAdministrator
-
 param (
+    [CmdletBinding( DefaultParameterSetName = 'Interactive' )]
     # Path to ISO containing Windows 11 image
-    [Parameter( Mandatory = $true )]
+    [Parameter( ParameterSetName = 'Interactive', Mandatory = $true )]
+    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [ValidateScript( { -not [string]::IsNullOrEmpty( $_ ) -and ( Test-Path -LiteralPath $_ ) } )]
     [string]
     $IsoPath,
-
+    
     # Index or image name
+    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
     [System.Object]
-    $ImageIndex = 0,
-
+    $ImageIndex,
+    
     # Name of create image file
+    [Parameter( ParameterSetName = 'Interactive' )]
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [ValidateScript( { Test-Path -IsValid -LiteralPath $_ } )]
     [string]
     $ImagePath = '.\tiny11.iso',
 
+    # All actions have to specified on the command line, no user interaction need
+    [Parameter( ParameterSetName = 'NonInteractive', Mandatory = $true )]
+    [switch]
+    $NonInteractive,
+    
     # Provisioned AppxPackages to remove
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [string[]]
-    $ProvisionedAppxPackagesToRemove = $null,
-
+    $ProvisionedAppxPackagesToRemove,
+    
     # Packages to remove
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [string[]]
-    $PackagesToRemove = $null,
-
+    $PackagesToRemove,
+    
     # Wether to remove system requirements
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $RemoveSystemRequirements,
-
+    
     # Wether to remove sponsored apps
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $RemoveSponsoredApps,
-
+    
     # Wether to remove Edge
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $RemoveEdge,
-
+    
     # Wether to remove OneDrive
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $RemoveOneDrive,
-
+    
     # Wether to remove Microsoft Teams
+    # [Parameter( ParameterSetName = 'NonInteractive')]
     # [switch]
     # $RemoveTeams,
-
+    
     # Wether to remove chat icon in taskbar
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $RemoveChatIcon,
-
+    
     # Wether to allow local account sign-up in OOBE
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $EnableLocalAccounts,
-
+    
     # Wether to disable reserved space
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [switch]
     $DisableReservedStorage,
-
+    
     # Hash value of ISO image
+    [Parameter( ParameterSetName = 'NonInteractive')]
     [string]
     $CheckIsoHash = '',
-
+    
     # Does not confirm file overrides with user
     [switch]
     $Force
 )
-
-<#
-    FUNCTIONS
-#>
-function Start-DismAction {
-    param (
-        [Parameter( Mandatory = $true, ValueFromRemainingArguments = $true )]
-        [Alias( 'Args' )]
-        [String]
-        $Arguments,
-
-        [Switch]
-        $NoImage,
-
-        [Switch]
-        $Break
-    )
-    begin {
-        $Output = New-TemporaryFile
-    }
-    process {
-        if ( $NoImage ) {
-            $Process = Start-Process -FilePath 'Dism.exe' -ArgumentList $Arguments -WindowStyle Hidden -RedirectStandardOutput $Output.FullName -PassThru -Wait
-        } else {
-            $Process = Start-Process -FilePath 'Dism.exe' -ArgumentList "/Image:$( $WorkingDirectory.scratch.FullName ) $( $Arguments )" -WindowStyle Hidden -RedirectStandardOutput $Output.FullName -PassThru -Wait
-        }
-        if ( $Process.ExitCode -ne 0 ) {
-            Write-Host -ForegroundColor Red 'ERROR'
-            if ( $Break ) {
-                Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
-            }
-            Write-Error ( Get-Content -LiteralPath $Output.FullName -Raw )
-        } else {
-            Write-Host -ForegroundColor Green 'SUCCESS'
-        }
-        $Process.ExitCode
-    }
-}
 
 <#
     VARIABLES
@@ -163,6 +145,10 @@ $ScriptProgress = @{
     'DismBootDismount'          = $false
     'IsoCreation'               = $false
 }
+$Choices = @(
+    New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
+    New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
+)
 
 <#
     SCRIPT
@@ -179,11 +165,7 @@ if ( -not [string]::IsNullOrEmpty( $CheckIsoHash ) ) {
 
 # Prepare working directory
 if ( Test-Path -LiteralPath $WorkingDirectory.tiny11Path ) {
-    $Choices = @(
-        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
-        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
-    )
-    if ( -not $Force -and 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
+    if ( -not $Force.IsPresent -or $NonInteractive.IsPresent -or 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Working directory `"$( $WorkingDirectory.tiny11Path )`" already exists"
     }
@@ -198,11 +180,7 @@ $WorkingDirectory.tiny11 = New-Item -ItemType Directory -Path $WorkingDirectory.
 $ScriptProgress.WorkingDirectory = $true
 # Prepare scratch directory
 if ( Test-Path -LiteralPath $WorkingDirectory.scratchPath ) {
-    $Choices = @(
-        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
-        New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
-    )
-    if ( -not $Force -and 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
+    if ( -not $Force.IsPresent -or $NonInteractive.IsPresent -or 0 -ne $Host.UI.PromptForChoice( 'Overwrite directory?', "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists, continue anyway?`r`nData may be lost!", $Choices, 1 ) ) {
         Write-Host -ForegroundColor Red 'ERROR'
         Throw "Scratch directory `"$( $WorkingDirectory.scratchPath )`" already exists"
     }
@@ -232,18 +210,15 @@ try {
     try {
         $IsoRaw = Mount-DiskImage -ImagePath ( Resolve-Path -LiteralPath $IsoPath ).Path -StorageType ISO -Access ReadOnly -PassThru -ErrorAction Stop
     } catch {
-        Write-Host -ForegroundColor Red 'ERROR'
         Throw $_
     }
+    $ScriptProgress.IsoMount = $true
     $Iso = Get-Volume -DiskImage $IsoRaw
     'boot.wim', 'install.wim' | ForEach-Object {
         if ( -not ( Test-Path -LiteralPath ( Join-Path -Path $Iso.Path -ChildPath "sources\$( $_ )" ) ) ) {
-            Write-Host -ForegroundColor Red 'ERROR'
-            $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction SilentlyContinue
             Throw [System.IO.FileNotFoundException]::new( "Cannot find Windows OS $( $_ ) in ISO" )
         }
     }
-    $ScriptProgress.IsoMount = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
 
     # Create temporary directory and copy image
@@ -251,65 +226,40 @@ try {
     $Output = New-TemporaryFile
     $Xcopy = Start-Process -FilePath 'xcopy.exe' -ArgumentList "/E /I /H /R /Y /J `"$( $Iso.DriveLetter ):`" `"$( $WorkingDirectory.tiny11.FullName )`"" -WindowStyle Hidden -RedirectStandardOutput $Output.FullName -Wait -PassThru
     if ( 0 -ne $Xcopy.ExitCode ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        $IsoRaw = $IsoRaw | Dismount-DiskImage -ErrorAction SilentlyContinue
         Throw "xcopy.exe exited with error code $( $LASTEXITCODE )`r`n$( Get-Content -LiteralPath $Output.FullName -Raw )"
     }
     $ScriptProgress.IsoCopy = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
-    
+
     # Get image information
     Write-Host ''
     Write-Host 'Getting image index information...'
-    $IndiciesRaw = Dism.exe /Get-WimInfo /wimfile:$( Join-Path -Path $Iso.Path -ChildPath 'sources\install.wim' )
-    if ( 0 -ne $LASTEXITCODE ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $IndiciesRaw )"
-    }
+    $Skus = Get-WindowsImage -ImagePath ( Join-Path -Path $Iso.Path -ChildPath 'sources\install.wim' ) -ErrorAction Stop
     Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host ''
-    $Indicies = @{}
-    for ( $I = 0; $I -lt $IndiciesRaw.Count; $I++ ) {
-        if ( $IndiciesRaw[$I] -like 'Index*' ) {
-            $Index = [int] ( $IndiciesRaw[$I] -split ':' )[1].Trim()
-            $Indicies[$Index] = @{
-                'Name' = ( $IndiciesRaw[$I + 1] -split ':' )[1].Trim()
-                'Description' = ( $IndiciesRaw[$I + 2] -split ':' )[1].Trim()
-                'Size' = ( $IndiciesRaw[$I + 3] -split ':' )[1].Trim()
-            }
-            $I += 3
-        }
+    foreach ( $Sku in $Skus ) {
+        "$( $Sku.ImageIndex ): $( $Sku.ImageName )"
     }
-    foreach ( $Key in $Indicies.Keys ) {
-        "$( $Key ): $( $Indicies[$Key].Name )"
-    }
-    $ImageIndexState = $false
-    if ( 0 -eq $ImageIndex ) {
+    if ( -not $NonInteractive.IsPresent ) {
         # Ask user for index
         do {
             Write-Host ''
             $ImageIndex = Read-Host -Prompt 'Please enter the image index'
-            if ( $ImageIndex -in $Indicies.Keys ) {
-                $ImageIndexState = $true
+            $SelectedSku = $Skus | Where-Object -Property 'ImageIndex' -EQ -Value $ImageIndex
+            if ( $SelectedSku -and $SelectedSku.Count -eq 1 ) {
                 break
             }
             Write-Error "Given index $( $ImageIndex ) not found in image"
         } while ( $true )
     } else {
         # User has specified index in advance
-        foreach ( $Index in $Indicies.GetEnumerator() ) {
-            if ( $ImageIndex -eq $Index.Name -or $ImageIndex -eq $Index.Value.Name ) {
-                $ImageIndex = $Index.Name
-                $ImageIndexState = $true
-                break
-            }
-        }
-        if ( -not $ImageIndexState ) {
-            Throw "Image index $( $ImageIndex ) is invalid"
+        $SelectedSku = $Skus | Where-Object -Property 'ImageIndex' -EQ -Value $ImageIndex
+        if ( -not $SelectedSku ) {
+            Throw "Given index $( $ImageIndex ) not found in image"
         }
     }
     $ScriptProgress.IsoIndex = $true
-    Write-Host "Selected image `"$( $Indicies[ [int] $ImageIndex ].Name )`" (Index $( $ImageIndex ))"
+    Write-Host "Selected image `"$( $SelectedSku.ImageName )`" (Index $( $SelectedSku.ImageIndex ))"
 
     # Unmount iso
     Write-Host -NoNewline 'Dismounting ISO...'
@@ -321,55 +271,43 @@ try {
     }
     $ScriptProgress.IsoDismount = $true
     Write-Host -ForegroundColor Green 'SUCCESS'
-
+    
     # Mount Windows image
-    Write-Host 'Mounting Windows image. This may take a while...'
-    $Output = Dism.exe /mount-image /imagefile:"`"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' )`"" /index:"$( $ImageIndex )" /mountdir:"`"$( $WorkingDirectory.scratch.FullName )`""
-    if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $Output )"
-    }
+    Write-Host 'Mounting Windows image...'
+    Mount-WindowsImage -ImagePath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -Index $SelectedSku.ImageIndex -Path ( $WorkingDirectory.scratch.FullName ) -CheckIntegrity -Optimize -ErrorAction Stop | Out-Null
     $ScriptProgress.DismInstallMount = $true
+    Write-Host -ForegroundColor Green 'SUCCESS'
 
     # Get provisioned applications
     Write-Host ''
     Write-Host 'Performing removal of applications...'
-    $ProvisionedAppXPackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-ProvisionedAppXPackages
-    if ( 0 -ne $LASTEXITCODE ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $ProvisionedAppXPackagesRaw )"
-    }
-    $ProvisionedAppXPackages = @()
-    for ( $I = 0; $I -lt $ProvisionedAppXPackagesRaw.Count; $I++) {
-        if ( $ProvisionedAppXPackagesRaw[$I] -like 'DisplayName*' ) {
-            $ProvisionedAppXPackages += @{
-                'DisplayName' = ( $ProvisionedAppXPackagesRaw[$I] -split ':' )[1].Trim()
-                'Version' = ( $ProvisionedAppXPackagesRaw[$I + 1] -split ':' )[1].Trim()
-                'PackageName' = ( $ProvisionedAppXPackagesRaw[$I + 4] -split ':' )[1].Trim()
-            }
-        $I += 5
-        }
-    }
+    $ProvisionedAppXPackages = Get-AppxProvisionedPackage -Path $WorkingDirectory.scratch.FullName -ErrorAction Stop
 
     # Remove applications
-    if ( $null -eq $ProvisionedAppxPackagesToRemove ) {
+    if ( -not $NonInteractive.IsPresent ) {
         # Ask user to specify applications
-        $Choices = @(
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
-        )
         foreach ( $Package in $ProvisionedAppXPackages ) {
-            if ( 0 -eq $Host.UI.PromptForChoice( "Remove $( $Package.DisplayName )?", "PackageName:`t$( $Package.PackageName )`r`nDisplayName:`t$( $Package.DisplayName )`r`nVersion:`t$( $Version )", $Choices, 1 ) ) {
+            if ( 0 -eq $Host.UI.PromptForChoice( "Remove $( $Package.DisplayName )?", "PackageName:`t$( $Package.PackageName )`r`nDisplayName:`t$( $Package.DisplayName )`r`nVersion:`t$( $Package.Version )", $Choices, 1 ) ) {
                 Write-Host -NoNewline "Removing $( $Package.PackageName ) "
-                Start-DismAction "/Remove-ProvisionedAppxPackage /PackageName:$( $Package.PackageName )" | Out-Null
+                try {
+                    Remove-AppxProvisionedPackage -PackageName $Package.PackageName -Path $TemporaryMount -ErrorAction Stop | Out-Null
+                    Write-Host -ForegroundColor Green 'SUCCESS'
+                } catch {
+                    Write-Host -ForegroundColor Red $_.ErrorDetails.Message
+                }
             }
         }
-    } elseif ( 0 -ne $ProvisionedAppxPackagesToRemove.Count ) {
+    } else {
         # Remove specified applications
         foreach ( $Package in $ProvisionedAppxPackagesToRemove ) {
-            $ProvisionedAppXPackages | Where-Object -Property 'DisplayName' -EQ -Value $Package.DisplayName | ForEach-Object {
+            $ProvisionedAppXPackages | Where-Object -Property 'DisplayName' -Like -Value "$( $Package )*" | ForEach-Object {
                 Write-Host -NoNewline "Removing $( $_.PackageName ) "
-                Start-DismAction "/Remove-ProvisionedAppxPackage /PackageName:$( $_.PackageName )" | Out-Null
+                try {
+                    Remove-AppxProvisionedPackage -PackageName $_.PackageName -Path $TemporaryMount -ErrorAction Stop | Out-Null
+                    Write-Host -ForegroundColor Green 'SUCCESS'
+                } catch {
+                    Write-Host -ForegroundColor Red $_.ErrorDetails.Message
+                }
             }
         }
     }
@@ -379,44 +317,39 @@ try {
     # Get packages
     Write-Host ''
     Write-Host 'Performing removal of system packages...'
-    $PackagesRaw = Dism.exe /Image:"$( $WorkingDirectory.scratch.FullName )" /Get-Packages
-    if ( 0 -ne $LASTEXITCODE ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $LASTEXITCODE ):`r`n$( $PackagesRaw )"
-    }
-    $Packages = @()
-    for ( $I = 0; $I -lt $PackagesRaw.Count; $I++) {
-        if ( $PackagesRaw[$I] -like 'Package Identity*' ) {
-            $Packages += ( $PackagesRaw[$I] -split ':' )[1].Trim()
-            $I += 3
-        }
-    }
+    $Packages = Get-WindowsPackage -Path $WorkingDirectory.scratch.FullName -ErrorAction Stop
 
     # Remove packages
-    if ( $null -eq $PackagesToRemove ) {
+    if ( -not $NonInteractive.IsPresent ) {
         # Ask user to specify applications
-        $Choices = @(
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
-        )
         foreach ( $Package in $Packages ) {
-            $PackageInfo = $Package -split '~'
-            if ( 0 -eq $Host.UI.PromptForChoice( "Remove $( $Package )?", "PackageName:`t$( $PackageInfo[0] )`r`nVersion:`t$( $PackageInfo[4] )", $Choices, 1 ) ) {
-                Write-Host -NoNewline "Removing $( $Package ) "
-                Start-DismAction "/Remove-Package /PackageName:$( $Package )" | Out-Null
+            $PackageInfo = $Package.PackageName -split '~'
+            if ( 0 -eq $Host.UI.PromptForChoice( "Remove $( $PackageInfo[0] )?", "PackageName:`t$( $Package.PackageName )`r`nVersion:`t$( $PackageInfo[4] )", $Choices, 1 ) ) {
+                Write-Host -NoNewline "Removing $( $Package.PackageName ) "
+                try {
+                    Remove-WindowsPackage -Path $WorkingDirectory.scratch.FullName -PackageName $Package.PackageName -ErrorAction Stop | Out-Null
+                    Write-Host -ForegroundColor Green 'SUCCESS'
+                } catch {
+                    Write-Host -ForegroundColor Red 'ERROR'
+                }
             }
         }
-    } elseif ( 0 -ne $PackagesToRemove.Count ) {
+    } else {
         foreach ( $Package in $PackagesToRemove ) {
-            $Packages | Where-Object { $_ -like "$( $Package )*" } | ForEach-Object {
+            $Packages | Where-Object -Property 'PackageName' -Like -Value "$( $Package )*" | ForEach-Object {
                 Write-Host -NoNewline "Removing $( $_ ) "
-                Start-DismAction "/Remove-Package /PackageName:$( $_ )" | Out-Null
+                try {
+                    Remove-WindowsPackage -Path $WorkingDirectory.scratch.FullName -PackageName $_.PackageName -ErrorAction Stop | Out-Null
+                    Write-Host -ForegroundColor Green 'SUCCESS'
+                } catch {
+                    Write-Host -ForegroundColor Red $_.ErrorDetails.Message
+                }
             }
         }
     }
     $ScriptProgress.PackageRemoval = $true
 
-    if ( $RemoveEdge ) {
+    if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove Microsoft Edge?', 'Removes Microsoft Edge', $Choices, 1 ) ) -or $RemoveEdge ) {
         foreach ( $EdgePath in ( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Program Files (x86)\Microsoft\Edge*' -Resolve ) ) {
             try {
                 $EdgePath = Get-Item -LiteralPath $EdgePath -Force
@@ -433,7 +366,7 @@ try {
         }
     }
 
-    if ( $RemoveOneDrive ) {
+    if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove Microsoft OneDrive?', 'Removes Microsoft OneDrive', $Choices, 1 ) ) -or $RemoveOneDrive ) {
         Write-Host -NoNewline 'Removing OneDrive...'
         $OneDrivePath = Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\OneDriveSetup.exe'
         $Owner = New-Object -TypeName System.Security.Principal.SecurityIdentifier -ArgumentList 'S-1-5-32-544'
@@ -455,7 +388,7 @@ try {
     Write-Host 'Removal of system packages complete!'
 
     # Load registry
-    if ( $RemoveSystemRequirements -or $RemoveTeams -or $RemoveSponsoredApps -or $EnableLocalAccounts -or $DisableReservedStorage -or $RemoveChatIcon ) {
+    if ( -not $NonInteractive.IsPresent -or ( $NonInteractive.IsPresent -and ( $RemoveSystemRequirements -or $RemoveTeams -or $RemoveSponsoredApps -or $EnableLocalAccounts -or $DisableReservedStorage -or $RemoveChatIcon ) ) ) {
         Write-Host ''
         Write-Host -NoNewline 'Loading registry...'
         reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
@@ -466,8 +399,9 @@ try {
         $ScriptProgress.InstallRegistryMount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
 
-        if ( $RemoveSystemRequirements ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove system requirements?', 'Removes system requirements', $Choices, 1 ) ) -or $RemoveSystemRequirements ) {
             # Bypass system requirements
+            $RemoveSystemRequirements = $true
             Write-Host -NoNewline 'Bypassing the images system requirements...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
             reg.exe ADD 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' /v 'SV1' /t REG_DWORD /d '0' /f | Out-Null
@@ -485,7 +419,7 @@ try {
         }
 
         <#
-        if ( $RemoveTeams ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove Microsoft Teams?', 'Removes Microsoft Teams', $Choices, 1 ) ) -or $RemoveTeams ) {
             # Disable Microsoft Teams
             Write-Host -NoNewline 'Disabling Microsoft Teams...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
@@ -501,7 +435,7 @@ try {
         }
         #>
 
-        if ( $RemoveSponsoredApps ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove sponsored apps?', 'Removes sponsored / preinstalled apps', $Choices, 1 ) ) -or $RemoveSponsoredApps ) {
             # Disable sponsored apps
             Write-Host -NoNewline 'Disable sponsored apps...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
@@ -514,7 +448,7 @@ try {
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
-        if ( $EnableLocalAccounts ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Enable local accounts?', 'Enables local accounts for sign-in', $Choices, 1 ) ) -or $EnableLocalAccounts ) {
             # Enable local accounts on OOBE
             Write-Host -NoNewline 'Enabling Local Accounts on OOBE...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
@@ -524,7 +458,7 @@ try {
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
-        if ( $DisableReservedStorage ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Disable reserved storage?', 'Disables reserved storage', $Choices, 1 ) ) -or $DisableReservedStorage ) {
             # Disable reserved storage
             Write-Host -NoNewline 'Disabling reserved storage...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
@@ -533,7 +467,7 @@ try {
             Write-Host -ForegroundColor Green 'SUCCESS'
         }
 
-        if ( $RemoveChatIcon ) {
+        if ( ( -not $NonInteractive.IsPresent -and 0 -eq $Host.UI.PromptForChoice( 'Remove chat icon?', 'Removes chat icon from taskbar', $Choices, 1 ) ) -or $RemoveChatIcon ) {
             # Disable chat icon
             Write-Host -NoNewline 'Disabling chat icon...'
             # ToDo: Switch to PowerShell built-in methods (New-Item)
@@ -556,34 +490,26 @@ try {
 
     # Cleanup
     Write-Host -NoNewline 'Cleaning up image...'
-    Start-DismAction '/Cleanup-Image /StartComponentCleanup /ResetBase' -Break | Out-Null
+    Repair-WindowsImage -Path $WorkingDirectory.scratch.FullName -StartComponentCleanup -ResetBase -ErrorAction Stop | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host -NoNewline 'Unmounting Windows image...'
-    $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
-    if ( 0 -ne $ExitCode ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
-    }
+    Dismount-WindowsImage -Path $WorkingDirectory.scratch.FullName -Save -CheckIntegrity -ErrorAction Stop | Out-Null
+    $ScriptProgress.DismInstallDismount = $true
+    Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host -NoNewline 'Exporting Windows image...'
-    $ExitCode = Start-DismAction -NoImage "/Export-Image /SourceImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) /SourceIndex:$ImageIndex /DestinationImageFile:$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) /compress:max"
-    if ( 0 -ne $ExitCode ) {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw "Dism.exe exited with error code $( $ExitCode )"
-    }
+    Export-WindowsImage -SourceImagePath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -SourceIndex $SelectedSku.ImageIndex -DestinationImagePath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) -CompressionType 'maximum' -ErrorAction Stop | Out-Null
+    Write-Host -ForegroundColor Green 'SUCCESS'
     Remove-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install.wim' ) -Force
     Rename-Item -LiteralPath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\install2.wim' ) -NewName 'install.wim' -Force
-    $ScriptProgress.DismInstallDismount = $true
     Write-Host 'Windows image completed. Continuing with boot.wim.'
 
     # Boot image modifications
     if ( $RemoveSystemRequirements ) {
         Write-Host ''
         Write-Host -NoNewline 'Mounting boot image. This may take a while...'
-        Dism.exe /mount-image /imagefile:"`"$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\boot.wim' )`"" /index:2 /mountdir:"`"$( $WorkingDirectory.scratch.FullName )`"" | Out-Null
-        if ( $LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1052638937 ) {
-            Write-Host -ForegroundColor Red 'ERROR'
-            Throw "Dism.exe exited with error code $( $LASTEXITCODE )"
-        }
+        Mount-WindowsImage -ImagePath ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'sources\boot.wim' ) -Index 2 -Path ( $WorkingDirectory.scratch.FullName ) -CheckIntegrity -Optimize -ErrorAction Stop | Out-Null
         $ScriptProgress.DismBootMount = $true
+        Write-Host -ForegroundColor Green 'SUCCESS'
         Write-Host -NoNewline 'Loading registry...'
         reg.exe LOAD HKLM\zCOMPONENTS "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\COMPONENTS' )" | Out-Null
         reg.exe LOAD HKLM\zDEFAULT "$( Join-Path -Path $WorkingDirectory.scratch.FullName -ChildPath 'Windows\System32\config\default' )" | Out-Null
@@ -616,12 +542,9 @@ try {
         $ScriptProgress.BootRegistryDismount = $true
         Write-Host -ForegroundColor Green 'SUCCESS'
         Write-Host -NoNewline 'Unmounting boot image...'
-        $ExitCode = Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /commit"
-        if ( 0 -ne $ExitCode ) {
-            Write-Host -ForegroundColor Red 'ERROR'
-            Throw "Dism.exe exited with error code $( $ExitCode ). Comitting image failed."
-        }
+        Dismount-WindowsImage -Path $WorkingDirectory.scratch.FullName -Save -CheckIntegrity -ErrorAction Stop | Out-Null
         $ScriptProgress.DismBootDismount = $true
+        Write-Host -ForegroundColor Green 'SUCCESS'
         Write-Host 'Boot image completed.'
     }
 
@@ -629,31 +552,21 @@ try {
     Write-Host ''
     Write-Host 'The tiny11 image is now completed. Proceeding with the making of the ISO.'
     Write-Host -NoNewline 'Copying unattend file for bypassing Microsoft account on OOBE...'
-    try {
-        Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'autounattend.xml' ) -Force -ErrorAction Stop
-    } catch {
-        Write-Host -ForegroundColor Red 'ERROR'
-        Throw $_
-    }
+    Copy-Item -Path ( Join-Path -Path $PSScriptRoot -ChildPath 'autounattend.xml' ) -Destination ( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'autounattend.xml' ) -Force -ErrorAction Stop
     Write-Host -ForegroundColor Green 'SUCCESS'
     Write-Host 'Creating ISO image...'
-    if ( -not $Force -and ( Test-Path -LiteralPath $ImagePath ) ) {
-        $Choices = @(
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&Yes'
-            New-Object -TypeName 'System.Management.Automation.Host.ChoiceDescription' -ArgumentList '&No'
-        )
-        if ( 0 -ne $Host.UI.PromptForChoice( 'Overwrite image?', "ISO `"$( $ImagePath )`" already exists, override?`r`nData may be lost!", $Choices, 0 ) ) {
-            Write-Host -ForegroundColor Red 'ERROR'
+    if ( -not $Force.IsPresent -and ( Test-Path -LiteralPath $ImagePath ) ) {
+        if ( $NonInteractive.IsPresent -or 0 -ne $Host.UI.PromptForChoice( 'Overwrite image?', "ISO `"$( $ImagePath )`" already exists, override?`r`nData may be lost!", $Choices, 0 ) ) {
             Throw "ISO `"$( $ImagePath )`" already exists"
         }
     }
     Start-Process -FilePath ( Join-Path -Path $PSScriptRoot -ChildPath 'oscdimg.exe' ) -ArgumentList "-m -o -u2 -udfver102 -bootdata:2#p0,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath 'boot\etfsboot.com' )#pEF,e,b$( Join-Path -Path $WorkingDirectory.tiny11.FullName -ChildPath '\efi\microsoft\boot\efisys.bin' ) $( $WorkingDirectory.tiny11.FullName ) $( $ImagePath )" -NoNewWindow -Wait
     if ( 0 -ne $LASTEXITCODE ) {
-        Write-Host -ForegroundColor Red 'ERROR'
         Throw "oscdimg.exe exited with error code $( $LASTEXITCODE )"
     }
     $ScriptProgress.IsoCreation = $true
 } catch {
+    Write-Host -ForegroundColor Red 'ERROR'
     Throw $_
 } finally {
     if ( $ScriptProgress.IsoCreation ) {
@@ -669,7 +582,7 @@ try {
             reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
             reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
         }
-        Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
+        Dismount-WindowsImage -Path $WorkingDirectory.scratch.FullName -Discard
     }
     if ( $ScriptProgress.DismInstallMount -and -not $ScriptProgress.DismInstallDismount ) {
         if ( $ScriptProgress.InstallRegistryMount -and -not $ScriptProgress.InstallRegistryDismount ) {
@@ -681,9 +594,9 @@ try {
             reg.exe UNLOAD HKLM\zSOFTWARE | Out-Null
             reg.exe UNLOAD HKLM\zSYSTEM | Out-Null
         }
-        Start-DismAction -NoImage "/unmount-image /mountdir:$( $WorkingDirectory.scratch.FullName ) /discard" | Out-Null
+        Dismount-WindowsImage -Path $WorkingDirectory.scratch.FullName -Discard
     }
-    if ( $ScriptProgress.IsoMount -and -not $ScriptProgress.IsoDismount ) {
+if ( $ScriptProgress.IsoMount -and -not $ScriptProgress.IsoDismount ) {
         $IsoRaw = $IsoRaw | Dismount-DiskImage
     }
     if ( $ScriptProgress.ScratchDirectory ) {
